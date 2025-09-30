@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>CPU Scheduling Simulator </title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root{
+    --bg1:#f5f5dc; /* beige */
+    --bg2:#efe2c8;
+    --card:#fffaf0;
+    --accent:#c7a27c;
+    --muted:#7d6b52;
+    --idle:#efe7db;
+  }
+  body{
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg,var(--bg1),var(--bg2));
+    margin:0; color: #3b2f2f;
+  }
+  header{
+    background: var(--accent);
+    color:white;
+    padding:18px 8px;
+    text-align:center;
+    font-size:1.2rem;
+    border-bottom:4px solid #b0895d;
+  }
+  .container{
+    max-width:980px;
+    margin:26px auto;
+    background:var(--card);
+    padding:22px;
+    border-radius:12px;
+    box-shadow:0 6px 18px rgba(0,0,0,0.12);
+  }
+  h2{ color:var(--muted); margin:0 0 12px 0; }
+  table{ width:100%; border-collapse:collapse; margin:12px 0; }
+  th,td{ padding:8px; border:1px solid #ddcdb2; text-align:center; }
+  th{ background:var(--accent); color:#fff; }
+  input[type=number]{ padding:6px; width:78%; border-radius:6px; border:1px solid #cbb89a; background:#fff9f0; }
+  .controls{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+  select, input[type=number].quant{ padding:8px; border-radius:6px; border:1px solid #c7a27c; background:#fff8e7; color: #3b2f2f; }
+  button.btn{
+    background:var(--accent); color:white; border:0; padding:10px 14px; border-radius:8px; cursor:pointer;
+  }
+  button.btn:hover{ background:#a9825d; }
+  .gantt{ display:flex; align-items:stretch; gap:4px; margin-top:14px; background:var(--idle); padding:8px; border-radius:8px; border:1px solid #ddcdb2; overflow:hidden; min-height:56px;}
+  .gantt .block{ display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; border-radius:6px; }
+  .timeline{ display:flex; margin-top:6px; gap:4px; align-items:center; font-size:13px; color: #4a3c2a; }
+  .timeline .tick{ display:flex; align-items:center; justify-content:flex-start; padding-left:6px; border-radius:2px; }
+  .results{ margin-top:16px; }
+  .footer{ text-align:center; color:#7d6b52; margin-top:18px; font-size:13px; }
+  @media(max-width:760px){
+    input[type=number]{ width:64%; }
+    .controls{ flex-direction:column; align-items:stretch; }
+  }
+</style>
+</head>
+<body>
+<header>⚡ CPU Scheduling Simulator </header>
+
+<div class="container">
+  <h2>Enter Processes</h2>
+
+  <table id="processTable">
+    <tr><th>Process</th><th>Burst Time</th><th>Arrival Time</th><th>Priority</th></tr>
+    <tr><td>P1</td><td><input type="number" min="0" value="5"></td><td><input type="number" min="0" value="0"></td><td><input type="number" min="0" value="2"></td></tr>
+    <tr><td>P2</td><td><input type="number" min="0" value="3"></td><td><input type="number" min="0" value="1"></td><td><input type="number" min="0" value="1"></td></tr>
+    <tr><td>P3</td><td><input type="number" min="0" value="8"></td><td><input type="number" min="0" value="2"></td><td><input type="number" min="0" value="3"></td></tr>
+  </table>
+
+  <div class="controls">
+    <label for="algo"><strong>Select Algorithm:</strong></label>
+    <select id="algo">
+      <option value="FCFS">FCFS</option>
+      <option value="SJF">SJF (Non-preemptive)</option>
+      <option value="PRIORITY">Priority (Non-preemptive)</option>
+      <option value="RR">Round Robin (Preemptive)</option>
+    </select>
+
+    <input class="quant" id="quantum" type="number" placeholder="Quantum (for RR)" min="1" style="width:160px;">
+    <button class="btn" id="simulateBtn">Simulate</button>
+    <button class="btn" id="addRow" style="background:#a9825d">+ Add Process</button>
+    <button class="btn" id="reset" style="background:#d1bfa7;color:#3b2f2f">Reset</button>
+  </div>
+
+  <h2>Gantt Chart</h2>
+  <div class="gantt" id="gantt"></div>
+  <div class="timeline" id="timeline"></div>
+
+  <div class="results">
+    <h2>Results</h2>
+    <table id="resultTable">
+      <tr><th>Process</th><th>Burst</th><th>Arrival</th><th>Waiting</th><th>Turnaround</th></tr>
+    </table>
+    <p id="avg"></p>
+  </div>
+</div>
+
+<div class="footer"> CPU Scheduling Simulation (FCFS, SJF, Priority, RR)</div>
+
+<script>
+/* ---------- UTILITIES ---------- */
+const palette = ["#c7a27c","#a9825d","#d9c7a1","#bfa68a","#e6d5b8","#c4a484","#d1b9a0","#b89f86"];
+
+function readProcessesFromTable(){
+  const rows = document.querySelectorAll("#processTable tr");
+  const procs = [];
+  for(let i=1;i<rows.length;i++){
+    const cells = rows[i].cells;
+    const burst = Number(cells[1].querySelector("input").value);
+    const arrival = Number(cells[2].querySelector("input").value);
+    const priority = Number(cells[3].querySelector("input").value);
+    if(Number.isFinite(burst) && burst > 0){
+      procs.push({
+        id: "P" + i,
+        burst: Math.floor(burst),
+        arrival: Math.max(0, Math.floor(isNaN(arrival)?0:arrival)),
+        priority: Math.floor(isNaN(priority)?0:priority),
+        color: palette[(i-1) % palette.length]
+      });
+    }
+  }
+  return procs;
+}
+
+function clearDisplay(){
+  document.getElementById("gantt").innerHTML = "";
+  document.getElementById("timeline").innerHTML = "";
+  const rt = document.getElementById("resultTable"); 
+  rt.innerHTML = "<tr><th>Process</th><th>Burst</th><th>Arrival</th><th>Waiting</th><th>Turnaround</th></tr>";
+  document.getElementById("avg").innerText = "";
+}
+
+/* ---------- SCHEDULERS (return events & completion times) ---------- */
+
+function scheduleFCFS(procs){
+  // non-preemptive, consider idle gaps
+  const events = [];
+  const comp = {};
+  let time = 0;
+  const list = [...procs].sort((a,b)=>a.arrival - b.arrival);
+  for(const p of list){
+    if(time < p.arrival){
+      events.push({id:'idle', start:time, duration:p.arrival-time, color:"#efe7db"});
+      time = p.arrival;
+    }
+    events.push({id:p.id, start:time, duration:p.burst, color:p.color});
+    time += p.burst;
+    comp[p.id] = time;
+  }
+  return {events, comp};
+}
+
+function scheduleSJF(procs){
+  // non-preemptive SJF considering arrivals
+  const events = [];
+  const comp = {};
+  let time = 0;
+  const remaining = procs.map(p => ({...p}));
+  let done=0, n=remaining.length;
+  while(done < n){
+    // available processes
+    const available = remaining.filter(p => !p.done && p.arrival <= time);
+    if(available.length === 0){
+      // jump to next arrival
+      const next = remaining.filter(p => !p.done).reduce((a,b)=> a.arrival < b.arrival ? a : b);
+      events.push({id:'idle', start:time, duration: next.arrival - time, color:"#efe7db"});
+      time = next.arrival;
+      continue;
+    }
+    // pick smallest burst
+    available.sort((a,b)=>a.burst - b.burst);
+    const p = available[0];
+    events.push({id:p.id, start:time, duration:p.burst, color:p.color});
+    time += p.burst;
+    p.done = true;
+    comp[p.id] = time;
+    done++;
+  }
+  return {events, comp};
+}
+
+function schedulePriority(procs){
+  // non-preemptive: lower priority number = higher priority
+  const events = [];
+  const comp = {};
+  let time = 0;
+  const remaining = procs.map(p => ({...p}));
+  let done=0, n=remaining.length;
+  while(done < n){
+    const available = remaining.filter(p => !p.done && p.arrival <= time);
+    if(available.length === 0){
+      const next = remaining.filter(p => !p.done).reduce((a,b)=> a.arrival < b.arrival ? a : b);
+      events.push({id:'idle', start:time, duration: next.arrival - time, color:"#efe7db"});
+      time = next.arrival;
+      continue;
+    }
+    available.sort((a,b)=>a.priority - b.priority);
+    const p = available[0];
+    events.push({id:p.id, start:time, duration:p.burst, color:p.color});
+    time += p.burst;
+    p.done = true;
+    comp[p.id] = time;
+    done++;
+  }
+  return {events, comp};
+}
+
+function scheduleRR(procs, quantum){
+  // Preemptive Round Robin with arrivals
+  const events = [];
+  const comp = {};
+  let time = 0;
+  const queue = [];
+  const list = procs.map(p => ({...p, remaining: p.burst}));
+  // sort by arrival
+  list.sort((a,b)=>a.arrival - b.arrival);
+  let idx = 0; // next to arrive
+  // helper to add arrivals up to current time
+  function addArrivals(){
+    while(idx < list.length && list[idx].arrival <= time){
+      queue.push(list[idx]);
+      idx++;
+    }
+  }
+  addArrivals();
+  if(queue.length === 0 && idx < list.length){
+    // jump to first arrival
+    events.push({id:'idle', start:time, duration: list[0].arrival - time, color:"#efe7db"});
+    time = list[0].arrival;
+    addArrivals();
+  }
+  while(queue.length > 0){
+    const p = queue.shift();
+    const exec = Math.min(quantum, p.remaining);
+    events.push({id:p.id, start:time, duration:exec, color:p.color});
+    time += exec;
+    p.remaining -= exec;
+    addArrivals();
+    if(p.remaining > 0){
+      // put at end
+      queue.push(p);
+    } else {
+      comp[p.id] = time;
+    }
+    // if queue empty but there are yet-to-arrive processes, advance time and add them
+    if(queue.length === 0 && idx < list.length){
+      if(time < list[idx].arrival){
+        events.push({id:'idle', start:time, duration: list[idx].arrival - time, color:"#efe7db"});
+        time = list[idx].arrival;
+      }
+      addArrivals();
+    }
+  }
+  return {events, comp};
+}
+
+/* ---------- RENDERING ---------- */
+
+function renderSchedule(events, comp, procs){
+  clearDisplay();
+  const gantt = document.getElementById("gantt");
+  const timeline = document.getElementById("timeline");
+  // get final time
+  const lastTime = events.reduce((m,e)=>Math.max(m, e.start + e.duration), 0);
+
+  // create blocks
+  for(const e of events){
+    const blk = document.createElement("div");
+    blk.className = "block";
+    blk.style.flex = e.duration; // proportion
+    blk.style.background = e.id === 'idle' ? "#efe7db" : e.color;
+    blk.style.color = e.id==='idle' ? "#6b5b4a" : "#fff";
+    blk.innerText = e.id === 'idle' ? "" : e.id;
+    gantt.appendChild(blk);
+  }
+
+  // timeline numbers (show start times)
+  for(const e of events){
+    const sp = document.createElement("div");
+    sp.className = "tick";
+    sp.style.flex = e.duration;
+    sp.innerText = e.start;
+    timeline.appendChild(sp);
+  }
+  // final end time
+  const last = document.createElement("div");
+  last.className = "tick";
+  last.style.minWidth = "36px";
+  last.innerText = lastTime;
+  timeline.appendChild(last);
+
+  // compute waiting & turnaround
+  const compTimes = comp; // map id->completion
+  const resultMap = {};
+  for(const p of procs){
+    const c = compTimes[p.id] ?? 0;
+    const tat = c - p.arrival;
+    const wt = tat - p.burst;
+    resultMap[p.id] = {burst: p.burst, arrival: p.arrival, waiting: wt, tat};
+  }
+
+  // render results table sorted by process id
+  const resultTable = document.getElementById("resultTable");
+  Object.keys(resultMap).sort().forEach(pid=>{
+    const r = resultMap[pid];
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${pid}</td><td>${r.burst}</td><td>${r.arrival}</td><td>${r.waiting}</td><td>${r.tat}</td>`;
+    resultTable.appendChild(tr);
+  });
+
+  // averages
+  const vals = Object.values(resultMap);
+  const avgWT = (vals.reduce((s,v)=>s+v.waiting,0) / vals.length).toFixed(2);
+  const avgTAT = (vals.reduce((s,v)=>s+v.tat,0) / vals.length).toFixed(2);
+  document.getElementById("avg").innerText = `Average Waiting Time = ${avgWT}, Average Turnaround Time = ${avgTAT}`;
+}
+
+/* ---------- MAIN ---------- */
+document.getElementById("simulateBtn").addEventListener("click", ()=>{
+  const procs = readProcessesFromTable();
+  if(procs.length === 0){ alert("Add at least one process with burst > 0"); return; }
+  const algo = document.getElementById("algo").value;
+  let schedule;
+  if(algo === "FCFS") schedule = scheduleFCFS(procs);
+  else if(algo === "SJF") schedule = scheduleSJF(procs);
+  else if(algo === "PRIORITY") schedule = schedulePriority(procs);
+  else if(algo === "RR"){
+    const q = Number(document.getElementById("quantum").value);
+    if(!Number.isFinite(q) || q <= 0){ alert("Enter valid quantum for RR"); return; }
+    schedule = scheduleRR(procs, Math.floor(q));
+  }
+  renderSchedule(schedule.events, schedule.comp, procs);
+});
+
+/* add/reset helpers */
+document.getElementById("addRow").addEventListener("click", ()=>{
+  const table = document.getElementById("processTable");
+  const newIndex = table.rows.length;
+  const tr = table.insertRow();
+  tr.innerHTML = `<td>P${newIndex}</td>
+    <td><input type="number" min="0" value="1"></td>
+    <td><input type="number" min="0" value="0"></td>
+    <td><input type="number" min="0" value="1"></td>`;
+});
+document.getElementById("reset").addEventListener("click", ()=>{
+  // remove extra rows and reset defaults
+  const table = document.getElementById("processTable");
+  while(table.rows.length > 4) table.deleteRow(-1); // keep header + 3 rows
+  // set defaults
+  const defaults = [[5,0,2],[3,1,1],[8,2,3]];
+  for(let i=1;i<=3;i++){
+    const r = table.rows[i];
+    r.cells[1].querySelector("input").value = defaults[i-1][0];
+    r.cells[2].querySelector("input").value = defaults[i-1][1];
+    r.cells[3].querySelector("input").value = defaults[i-1][2];
+  }
+  clearDisplay();
+});
+</script>
+</body>
+</html>
